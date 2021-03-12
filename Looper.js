@@ -2,6 +2,7 @@
 String.prototype.contains = function(str) { return this.indexOf(str) != -1; };
 Array.prototype.contains = function(str) { return this.indexOf (str) != -1;};
 
+// Some inital variables
 var tempo = 120;
 var bars = 4;
 var beat = 4;
@@ -11,6 +12,7 @@ var recorded = [];
 var isrecording = false;
 var playinginterval;
 
+// method to get system time in milliseconds
 function getTime(){
 	return (new Date()).getTime();
 }
@@ -148,7 +150,13 @@ MPP.client.on("a", function (msg) {
 	
 });
 
-// keyboard detection stuff
+/*
+keyboard detection stuff this is basically ripped off from script.js in MPP
+with few alterations.
+
+The script handles only key presses from your computer's keyboard only.
+*/
+
 
 $(document).on("keydown", handleKeyDown );
 $(document).on("keyup", handleKeyUp);
