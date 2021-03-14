@@ -2,91 +2,129 @@
 String.prototype.contains = function(str) { return this.indexOf(str) != -1; };
 Array.prototype.contains = function(str) { return this.indexOf (str) != -1;};
 
-// Some inital variables
+/*
+the tempo of the recording, if changed note timings don't 
+so if you already recorded it will get messed up
+*/
 var tempo = 120;
+// how many bars in a recording
 var bars = 4;
+// the amount of beats in one bar
 var beat = 4;
 
-
+// recorded holds all recorded notes
 var recorded = [];
+/*
+temprecorded holds all notes recorded in a recording session,
+is cleared when recording is done and pushed onto recorded
+*/
+var temprecorded = [];
+// a boolean to detect if script is recording
 var isrecording = false;
+/*
+if this is true then recorded array won't be cleared
+this allows for layering recordings on top of each other
+*/
+var layering = false;
+// interval for looping the recorded piece
 var playinginterval;
 
-// method to get system time in milliseconds
+
+// method to get current system time
 function getTime(){
 	return (new Date()).getTime();
 }
 
+// idk why this is here but the variable is used to set recorded note offsets from the start of the recording
 var recordingtime = getTime();
 
+// sending chat stuff
 function sendChat(msg) {
 	MPP.chat.send(msg);
 }
 
+// bip
 function tik(){
 	MPP.press("c7",1);
 }
 
+// bop
 function tok(){
 	MPP.press("c6",1);
 }
 
-function play(){
-	var time = 1000*(60/tempo)*beat;
+// timeouts holds all notes to be played in the effort to cancel them on /stop
+var timeouts = [];
+function playrecorded(){
 	for (var i in recorded){
 		var arr = recorded[i];
 		var type = arr[0]
 		var note = arr[1];
 		var vol = arr[2];
 		var diff = arr[3];
+		// pushing setTimeout for note press
 		if (type == "on"){
-			setTimeout(MPP.press,diff,note,vol);
+			timeouts.push(setTimeout(MPP.press,diff,note,vol));
 		}
+		// pushing setTimeout for note release
 		else if (type == "off"){
-			setTimeout(MPP.release,diff,note);
+			timeouts.push(setTimeout(MPP.release,diff,note));
+		}
+		// This is to not store too much in timeouts
+		if (timeouts.length >= recorded.length*3){
+			for (var i = 0; i < recorded.length; i++){
+				timeouts.shift();
+			}
 		}
 		
 	}
+}
+
+// loop the recorded part infinitely until stopped
+function play(){
+	var time = 1000*(60/tempo)*beat;
+	playrecorded();
 	playinginterval = setInterval(function(){
-		for (var i in recorded){
-			var arr = recorded[i];
-			var type = arr[0]
-			var note = arr[1];
-			var vol = arr[2];
-			var diff = arr[3];
-			if (type == "on"){
-				setTimeout(MPP.press,diff,note,vol);
-			}
-			else if (type == "off"){
-				setTimeout(MPP.release,diff,note);
-			}
-			
-		}
+		playrecorded();
 	}, time*bars);
 	
 }
 
+// an offset to start the actual recording before metronome, helpful for not missing notes played exactly on the ticking
+var offset = 200;
+// togrecord is used in case you want to stop recording before recording timer is finished
+var togrecord;
+// tognote is another array in case you want to stop recording to clear timeouts
+var tognote = [];
 function record(){
 	var time = 1000*(60/tempo)*beat;
+	temprecorded = [];
+	if (layering){
+		setTimeout(function(){
+			playrecorded();
+		},time-offset);
+	}
 	setTimeout(function(){
 		isrecording = true;
 		recordingtime = getTime();
 		sendChat("Recording has started");
-	},time);
-	setTimeout(function(){
+	},time-offset);
+	togrecord = setTimeout(function(){
 		isrecording = false;
+		recorded = recorded.concat(temprecorded);
 		sendChat("Recording has stopped");
-	},time*(bars+1));
+	},time*(bars+1) + offset);
 	for (var i = 0; i <= bars; i++){
 		var delay = i*time;
-		setTimeout(function(){tik();},delay);
+		tognote.push(setTimeout(function(){tik();},delay));
 		for (var j = 1; j < beat; j++){
-			setTimeout(function(){tok();},delay+j*(time/beat));
+			tognote.push(setTimeout(function(){tok();},delay+j*(time/beat)));
 		}
 	}
 	
 }
 
+// a lovely event handler thing
 MPP.client.on("a", function (msg) {
 	var args = msg.a.split(' ');
 	var cmd = args[0];
@@ -133,8 +171,18 @@ MPP.client.on("a", function (msg) {
 	}
 	
 	if (cmd == "/record"){
-		recorded = [];
+		if (!layering)
+			recorded = [];
 		sendChat("Recording will start after first bar!");
+		if (isrecording){
+			isrecording = false;
+			recorded = recorded.concat(temprecorded);
+			sendChat("Recording has stopped");
+			clearTimeout(togrecord);
+			tognote.forEach(t => clearTimeout(t));
+			tognote = [];
+			return;
+		}
 		record();
 	}
 	
@@ -146,17 +194,19 @@ MPP.client.on("a", function (msg) {
 	if (cmd == "/stop"){
 		sendChat("Playing will stop next loop!");
 		clearInterval(playinginterval);
+		timeouts.forEach(t => clearTimeout(t));
+		timeouts = [];
+	}
+	
+	if (cmd == "/layering"){
+		layering = !layering;
+		sendChat("Layering set to: " + layering);
 	}
 	
 });
 
-/*
-keyboard detection stuff this is basically ripped off from script.js in MPP
-with few alterations.
-
-The script handles only key presses from your computer's keyboard only.
-*/
-
+// keyboard detection stuff
+// this part is nabbed from script.js
 
 $(document).on("keydown", handleKeyDown );
 $(document).on("keyup", handleKeyUp);
@@ -220,6 +270,13 @@ var velocityFromMouseY = function() {
 };
 var transpose_octave = 0;
 var sustain = false;
+
+// notes in recorded/temprecorded arrays are stored by this format per element: [note-type, note-name, note-volume, note-offset-from-timer]
+// note-type: on,off
+// note-name: the name of the note, already handled by the key_binding object, if you have another layout you might want to change this as well
+// note-volume: 0 to 1
+// note-offset-from-timer: time in millisecond from start of recording till note press/release
+
 function handleKeyDown(evt){
 	if ($("#chat").hasClass("chatting"))
 		return;
@@ -235,11 +292,11 @@ function handleKeyDown(evt){
 		if(evt.shiftKey) ++octaveadded;
 		else if(evt.ctrlKey) --octaveadded;
 		var nt = note.note + (1 + note.octave +transpose_octave+octaveadded);
-		// This part is where I detect the key and play the chord based on the scale/chord-type (Incomplete)
+		// record note press
 		if (isrecording){
 			var diff = getTime() - recordingtime;
 			var type = "on";
-			recorded.push([type,nt,vol,diff]);
+			temprecorded.push([type,nt,vol,diff]);
 		}
 		
 	} else if((code === 38 || code === 39) && transpose_octave < 3) {
@@ -270,13 +327,13 @@ function handleKeyUp(evt){
 		if(evt.shiftKey) ++octaveadded;
 		else if(evt.ctrlKey) --octaveadded;
 		var nt = note.note + (1 + note.octave +transpose_octave+octaveadded);
-		// This part is where I detect the key and play the chord based on the scale/chord-type (Incomplete)
+		// record note releases and ignore if sustain is enabled
 		if (isrecording){
 			if (sustain)
 				return;
 			var diff = getTime() - recordingtime;
 			var type = "off";
-			recorded.push([type,nt,vol,diff]);
+			temprecorded.push([type,nt,vol,diff]);
 		}
 		
 	}
@@ -285,5 +342,59 @@ function handleKeyUp(evt){
 	}
 }
 
+// attempting midi stuff
 
 
+// Check if browser can request midi access
+if (navigator.requestMIDIAccess) {
+    console.log('MIDI is supported on this browser!');
+	
+	navigator.requestMIDIAccess().then(
+	function(midiAccess){
+		// loop through all midi inputs and register a midi message handler for each
+		for (var input of midiAccess.inputs.values()){
+			input.onmidimessage = midiMessageReceived;
+		};
+	},function(){console.log("Failed to access midi devices!");});
+	
+} else {
+    console.log('MIDI is not supported on this browser');
+}
+
+function midiMessageReceived(msg) {
+    //console.log(msg);
+	var data = msg.data;
+	// type of data received, 144 = note on, 128 = note off
+	var type = data[0];
+	// midi key id 0 - 127, 21 is the lowest A note
+	var id = data[1];
+	// midi velocity ranges from 0 to 127
+	var vel = data[2]/127;
+	
+	var noteon = type == 144;
+	// as I read sometimes vel 0 can mean note-off msg
+	var noteoff = (type == 128) || (vel == 0);
+	
+	var note = Object.keys(MPP.piano.keys)[id-21];
+	
+	if (note === undefined)
+		return;
+	
+	if (noteon){
+		// record note press
+		if (isrecording){
+			var diff = getTime() - recordingtime;
+			temprecorded.push(["on",note,vel,diff]);
+		}
+	}
+	else if (noteoff){
+		// record note releases and ignore if sustain is enabled
+		if (isrecording){
+			if (sustain)
+				return;
+			var diff = getTime() - recordingtime;
+			temprecorded.push(["off",note,vel,diff]);
+		}
+	}
+	
+}
