@@ -1,4 +1,3 @@
-
 String.prototype.contains = function(str) { return this.indexOf(str) != -1; };
 Array.prototype.contains = function(str) { return this.indexOf (str) != -1;};
 
@@ -268,7 +267,7 @@ var key_binding = {
 var velocityFromMouseY = function() {
 	return 0.1 + (my / 100) * 0.6;
 };
-var transpose_octave = 0;
+var transpose = 0;
 var sustain = false;
 
 // notes in recorded/temprecorded arrays are stored by this format per element: [note-type, note-name, note-volume, note-offset-from-timer]
@@ -276,7 +275,7 @@ var sustain = false;
 // note-name: the name of the note, already handled by the key_binding object, if you have another layout you might want to change this as well
 // note-volume: 0 to 1
 // note-offset-from-timer: time in millisecond from start of recording till note press/release
-
+var piano_keys = Object.keys(MPP.piano.keys);
 function handleKeyDown(evt){
 	if ($("#chat").hasClass("chatting"))
 		return;
@@ -291,18 +290,26 @@ function handleKeyDown(evt){
 		var octaveadded = 0;
 		if(evt.shiftKey) ++octaveadded;
 		else if(evt.ctrlKey) --octaveadded;
-		var nt = note.note + (1 + note.octave +transpose_octave+octaveadded);
-		// record note press
-		if (isrecording){
-			var diff = getTime() - recordingtime;
-			var type = "on";
-			temprecorded.push([type,nt,vol,diff]);
+		var nt = note.note + (1 + note.octave+octaveadded);
+		try{
+			nt = piano_keys[piano_keys.indexOf(nt)+transpose];
+			// record note press
+			if (isrecording){
+				var diff = getTime() - recordingtime;
+				var type = "on";
+				temprecorded.push([type,nt,vol,diff]);
+			}
 		}
+		catch(err){}
 		
-	} else if((code === 38 || code === 39) && transpose_octave < 3) {
-		++transpose_octave;
-	} else if((code === 40 || code === 37) && transpose_octave > -2) {
-		--transpose_octave;
+	} else if(code === 38) {
+		transpose += 12;
+	} else if(code === 40) {
+		transpose -= 12;
+	} else if(code === 39) {
+		transpose++;
+	} else if(code === 37) {
+		transpose--;
 	}
 	else if(code == 9) { // Tab (don't tab away from the piano)
 		evt.preventDefault();
@@ -326,16 +333,19 @@ function handleKeyUp(evt){
 		var octaveadded = 0;
 		if(evt.shiftKey) ++octaveadded;
 		else if(evt.ctrlKey) --octaveadded;
-		var nt = note.note + (1 + note.octave +transpose_octave+octaveadded);
-		// record note releases and ignore if sustain is enabled
-		if (isrecording){
-			if (sustain)
-				return;
-			var diff = getTime() - recordingtime;
-			var type = "off";
-			temprecorded.push([type,nt,vol,diff]);
-		}
-		
+		var nt = note.note + (1 + note.octave+octaveadded);
+		try{
+			nt = piano_keys[piano_keys.indexOf(nt)+transpose];
+			// record note releases and ignore if sustain is enabled
+			if (isrecording){
+				if (sustain)
+					return;
+				var diff = getTime() - recordingtime;
+				var type = "off";
+				temprecorded.push([type,nt,vol,diff]);
+			}
+			
+		} catch(err){}
 	}
 	else if(code == 9) { // Tab (don't tab away from the piano)
 		evt.preventDefault();
@@ -375,7 +385,7 @@ function midiMessageReceived(msg) {
 	// as I read sometimes vel 0 can mean note-off msg
 	var noteoff = (type == 128) || (vel == 0);
 	
-	var note = Object.keys(MPP.piano.keys)[id-21];
+	var note = piano_keys[id-21];
 	
 	if (note === undefined)
 		return;
